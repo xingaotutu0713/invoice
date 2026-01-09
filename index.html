@@ -1,0 +1,614 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>易报销 - 智能存储分页版</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
+    <style>
+        .fade-in { animation: fadeIn 0.3s ease-in; }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .upload-area:hover { border-color: #4f46e5; background-color: #f8fafc; }
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-thumb { background: #e2e8f0; border-radius: 10px; }
+        .editable-field:focus { background: #fff; outline: 2px solid #4f46e5; border-radius: 4px; padding: 2px 4px; z-index: 10; position: relative; }
+        .editable-field:hover { background: #f1f5f9; cursor: text; }
+        .row-selected { background-color: #f5f3ff !important; }
+        #batch-bar { transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.3s; }
+        #batch-bar.hidden-bar { transform: translate(-50%, 100px); opacity: 0; pointer-events: none; }
+        .avatar-container { position: relative; cursor: pointer; }
+        .avatar-logo { transition: all 0.3s ease; object-fit: cover; }
+        .avatar-container:hover .avatar-logo { transform: rotate(15deg) scale(1.1); filter: brightness(0.9); }
+        .avatar-overlay {
+            position: absolute; inset: 0; background: rgba(0,0,0,0.3);
+            display: flex; items-center; justify-content: center;
+            opacity: 0; transition: opacity 0.3s; border-radius: 9999px;
+        }
+        .avatar-container:hover .avatar-overlay { opacity: 1; }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-800 min-h-screen font-sans pb-24">
+
+    <nav class="bg-white border-b border-slate-200 px-4 py-3 sticky top-0 z-20">
+        <div class="max-w-7xl mx-auto flex justify-between items-center">
+            <h1 class="text-xl font-bold text-indigo-600 flex items-center">
+                <div class="avatar-container mr-3" onclick="document.getElementById('avatar-input').click()">
+                    <img id="display-avatar" 
+                         src="https://images.unsplash.com/photo-1583511655857-d19b40a7a54e?q=80&w=100&auto=format&fit=crop" 
+                         alt="头像" 
+                         class="w-10 h-10 rounded-full border-2 border-indigo-100 shadow-sm avatar-logo">
+                    <div class="avatar-overlay text-white text-[10px] font-bold">更换</div>
+                    <input type="file" id="avatar-input" class="hidden" accept="image/*" onchange="handleAvatarUpload(this)">
+                </div>
+                易报销
+            </h1>
+            <div class="flex items-center space-x-4">
+                <button onclick="exportJSON()" class="text-xs font-bold text-slate-400 hover:text-indigo-600 transition-colors">
+                    <i class="fas fa-download mr-1"></i> 数据导出
+                </button>
+            </div>
+        </div>
+    </nav>
+
+    <main class="max-w-7xl mx-auto p-4 md:p-8">
+        <!-- 录入区 -->
+        <div class="mb-8">
+            <section class="bg-white rounded-3xl shadow-sm border border-slate-200 p-8">
+                <div class="flex flex-col md:flex-row items-center justify-between gap-8">
+                    <div class="flex-1">
+                        <h2 class="text-xl font-bold text-slate-800 mb-2">智能录入</h2>
+                        <p class="text-sm text-slate-500 mb-6">上传图片或PDF发票，AI 将自动提取信息（支持查重）。</p>
+                        <div id="ai-loading" class="hidden mt-2 p-4 bg-indigo-50 rounded-2xl flex items-center space-x-4 border border-indigo-100">
+                            <div class="animate-spin rounded-full h-5 w-5 border-2 border-indigo-500 border-t-transparent"></div>
+                            <div class="text-sm font-bold text-indigo-600" id="loading-status">正在解析文件...</div>
+                        </div>
+                    </div>
+                    <div class="w-full md:w-80">
+                        <div class="upload-area border-2 border-dashed border-slate-200 rounded-3xl p-10 text-center transition-all cursor-pointer relative bg-slate-50/50">
+                            <input type="file" id="file-input" class="absolute inset-0 opacity-0 cursor-pointer" accept="image/*,.pdf" multiple>
+                            <i class="fas fa-cloud-upload-alt text-4xl text-indigo-400 mb-3"></i>
+                            <p class="text-sm font-bold text-slate-600">点击或拖拽上传</p>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </div>
+
+        <!-- 统计 -->
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+            <div class="bg-slate-900 p-6 rounded-2xl text-white shadow-xl">
+                <p class="text-slate-400 text-[10px] font-bold uppercase tracking-widest">总金额</p>
+                <p class="text-3xl font-bold mt-2 font-mono" id="stat-total">¥ 0.00</p>
+            </div>
+            <div class="bg-emerald-50 border border-emerald-100 p-6 rounded-2xl">
+                <p class="text-emerald-600 text-[10px] font-bold uppercase tracking-widest">已完成</p>
+                <p class="text-3xl font-bold mt-2 text-emerald-700 font-mono" id="stat-reimbursed">¥ 0.00</p>
+            </div>
+            <div class="bg-amber-50 border border-amber-100 p-6 rounded-2xl">
+                <p class="text-amber-600 text-[10px] font-bold uppercase tracking-widest">待报销</p>
+                <p class="text-3xl font-bold mt-2 text-amber-700 font-mono" id="stat-pending">¥ 0.00</p>
+            </div>
+        </div>
+
+        <!-- 列表 -->
+        <section class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+            <div class="px-6 py-4 border-b border-slate-100 flex flex-col md:flex-row md:justify-between md:items-center bg-white space-y-3 md:space-y-0">
+                <div class="flex items-center space-x-4">
+                    <h3 class="font-bold text-slate-700">明细列表</h3>
+                    <select id="month-filter" onchange="currentPage=1;render()" class="text-xs border border-slate-200 rounded-lg px-3 py-1.5 font-bold text-slate-600 bg-slate-50">
+                        <option value="all">所有月份</option>
+                    </select>
+                </div>
+                <div class="flex items-center text-xs font-bold text-slate-400 bg-slate-50 px-3 py-1.5 rounded-full">
+                    <span class="mr-1">共</span>
+                    <span id="total-items-count" class="text-indigo-600 mx-0.5">0</span>
+                    <span>条记录</span>
+                </div>
+            </div>
+
+            <div class="overflow-x-auto">
+                <table class="w-full text-left">
+                    <thead>
+                        <tr class="text-[11px] font-bold text-slate-400 uppercase tracking-wider border-b border-slate-100 bg-slate-50/30">
+                            <th class="px-4 py-4 w-12 text-center">
+                                <input type="checkbox" id="select-all" onclick="toggleSelectAll(this)" class="w-4 h-4 rounded border-slate-300 text-indigo-600 cursor-pointer">
+                            </th>
+                            <th class="px-2 py-4 w-12 text-center">预览</th>
+                            <th class="px-4 py-4">发票编号</th>
+                            <th class="px-4 py-4 text-right">金额</th>
+                            <th class="px-4 py-4 text-center">日期</th>
+                            <th class="px-4 py-4 text-center">状态</th>
+                            <th class="px-4 py-4">备注 (可点击编辑)</th>
+                            <th class="px-4 py-4 text-center">操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="expense-list" class="divide-y divide-slate-50"></tbody>
+                </table>
+                <div id="empty-state" class="hidden py-24 text-center text-slate-300">
+                    <i class="fas fa-file-invoice text-5xl mb-4 opacity-10"></i>
+                    <p class="text-sm font-medium">暂无报销记录</p>
+                </div>
+            </div>
+
+            <!-- 分页控制栏 -->
+            <div class="px-6 py-4 bg-slate-50/50 border-t border-slate-100 flex flex-col md:flex-row items-center justify-between gap-4">
+                <div class="flex items-center space-x-4">
+                    <div class="text-xs text-slate-400 font-medium">
+                        第 <span id="page-current" class="text-slate-700 font-bold">1</span> / <span id="page-total">1</span> 页
+                    </div>
+                    <div class="flex items-center space-x-2 text-xs font-medium text-slate-400 border-l border-slate-200 pl-4">
+                        <span>每页显示:</span>
+                        <select id="items-per-page" onchange="changeItemsPerPage(this.value)" class="bg-transparent border border-slate-200 rounded px-1.5 py-0.5 font-bold text-slate-600 focus:outline-none focus:border-indigo-400 cursor-pointer">
+                            <option value="10">10</option>
+                            <option value="20">20</option>
+                            <option value="50">50</option>
+                            <option value="100">100</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="flex items-center space-x-1">
+                    <button onclick="changePage('prev')" class="p-2 w-8 h-8 flex items-center justify-center rounded-lg hover:bg-white hover:shadow-sm border border-transparent hover:border-slate-200 transition-all text-slate-500 disabled:opacity-30 disabled:pointer-events-none">
+                        <i class="fas fa-chevron-left text-xs"></i>
+                    </button>
+                    <div id="page-numbers" class="flex items-center space-x-1"></div>
+                    <button onclick="changePage('next')" class="p-2 w-8 h-8 flex items-center justify-center rounded-lg hover:bg-white hover:shadow-sm border border-transparent hover:border-slate-200 transition-all text-slate-500 disabled:opacity-30 disabled:pointer-events-none">
+                        <i class="fas fa-chevron-right text-xs"></i>
+                    </button>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <!-- 批量栏 -->
+    <div id="batch-bar" class="hidden-bar fixed bottom-8 left-1/2 -translate-x-1/2 bg-slate-900 text-white px-6 py-4 rounded-3xl shadow-2xl flex items-center space-x-6 z-40 border border-slate-700">
+        <div class="flex items-center space-x-2 border-r border-slate-700 pr-6">
+            <span class="text-xs font-bold text-slate-400">已选</span>
+            <span id="selected-count" class="bg-indigo-500 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center font-bold">0</span>
+        </div>
+        <div class="flex items-center space-x-2">
+            <button onclick="batchUpdateStatus('completed')" class="hover:bg-emerald-500/20 text-emerald-400 px-3 py-1.5 rounded-xl text-xs font-bold flex items-center">
+                <i class="fas fa-check-double mr-2"></i> 完成报销
+            </button>
+            <button onclick="batchDelete()" class="hover:bg-red-500/20 text-red-400 px-3 py-1.5 rounded-xl text-xs font-bold flex items-center">
+                <i class="fas fa-trash-alt mr-2"></i> 批量删除
+            </button>
+        </div>
+    </div>
+
+    <!-- 预览窗口 -->
+    <div id="preview-modal" class="hidden fixed inset-0 z-50 bg-black/90 items-center justify-center p-4 backdrop-blur-md" onclick="closePreview(event)">
+        <div class="relative bg-white p-2 rounded-xl shadow-2xl w-full max-w-5xl h-[90vh] flex flex-col overflow-hidden">
+            <div class="flex justify-between items-center p-3 border-b bg-slate-50">
+                <span class="text-sm font-bold text-slate-600 px-2" id="preview-filename">预览</span>
+                <button onclick="closePreview(event, true)" class="text-slate-400 hover:text-red-500 text-2xl px-2 transition-colors"><i class="fas fa-times-circle"></i></button>
+            </div>
+            <div id="preview-container" class="flex-1 overflow-auto bg-slate-200 flex justify-center items-start"></div>
+        </div>
+    </div>
+
+    <div id="toast" class="fixed bottom-10 left-1/2 transform -translate-x-1/2 bg-slate-900 text-white px-6 py-3 rounded-2xl shadow-2xl opacity-0 transition-all pointer-events-none z-50 text-xs font-bold"></div>
+
+    <script>
+        const DB_NAME = 'YiBaoXiaoDB';
+        const DB_VERSION = 2; 
+        const STORE_NAME = 'expenses';
+        const CONFIG_STORE = 'config';
+        let db;
+
+        const initDB = () => new Promise((resolve, reject) => {
+            const req = indexedDB.open(DB_NAME, DB_VERSION);
+            req.onupgradeneeded = e => {
+                const dbRes = e.target.result;
+                if (!dbRes.objectStoreNames.contains(STORE_NAME)) {
+                    dbRes.createObjectStore(STORE_NAME, { keyPath: 'id' });
+                }
+                if (!dbRes.objectStoreNames.contains(CONFIG_STORE)) {
+                    dbRes.createObjectStore(CONFIG_STORE, { keyPath: 'key' });
+                }
+            };
+            req.onsuccess = e => { db = e.target.result; resolve(); };
+            req.onerror = e => reject(e);
+        });
+
+        const dbGetAll = () => new Promise(res => {
+            const tx = db.transaction([STORE_NAME], 'readonly');
+            const req = tx.objectStore(STORE_NAME).getAll();
+            req.onsuccess = () => res(req.result);
+        });
+
+        const dbPut = item => new Promise(res => {
+            const tx = db.transaction([STORE_NAME], 'readwrite');
+            tx.objectStore(STORE_NAME).put(JSON.parse(JSON.stringify(item)));
+            tx.oncomplete = () => res();
+        });
+
+        const dbDelete = id => new Promise(res => {
+            const tx = db.transaction([STORE_NAME], 'readwrite');
+            tx.objectStore(STORE_NAME).delete(id);
+            tx.oncomplete = () => res();
+        });
+
+        const dbSetAvatar = (base64) => new Promise(res => {
+            const tx = db.transaction([CONFIG_STORE], 'readwrite');
+            tx.objectStore(CONFIG_STORE).put({ key: 'user_avatar', value: base64 });
+            tx.oncomplete = () => res();
+        });
+
+        const dbGetAvatar = () => new Promise(res => {
+            const tx = db.transaction([CONFIG_STORE], 'readonly');
+            const req = tx.objectStore(CONFIG_STORE).get('user_avatar');
+            req.onsuccess = () => res(req.result ? req.result.value : null);
+        });
+
+        const ARK_API_KEY = "2dd92269-5b82-483b-b02c-4ac31eb43301";
+        const ARK_ENDPOINT = "ep-20260109164238-ntt8l";
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+        let expenses = [];
+        let selectedIds = new Set();
+        let currentPage = 1;
+        let itemsPerPage = parseInt(localStorage.getItem('ybx_items_per_page')) || 10;
+
+        window.onload = async () => {
+            await initDB();
+            const savedAvatar = await dbGetAvatar();
+            if (savedAvatar) document.getElementById('display-avatar').src = savedAvatar;
+            expenses = await dbGetAll();
+            document.getElementById('items-per-page').value = itemsPerPage;
+            updateFilterOptions();
+            render();
+        };
+
+        async function handleAvatarUpload(input) {
+            const file = input.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = async (e) => {
+                const base64 = e.target.result;
+                document.getElementById('display-avatar').src = base64;
+                await dbSetAvatar(base64);
+                showToast('头像已更新');
+            };
+            reader.readAsDataURL(file);
+        }
+
+        document.getElementById('file-input').onchange = async (e) => {
+            const files = Array.from(e.target.files);
+            if (files.length === 0) return;
+            const loading = document.getElementById('ai-loading');
+            const status = document.getElementById('loading-status');
+            loading.classList.remove('hidden');
+
+            for (let i = 0; i < files.length; i++) {
+                const file = files[i];
+                status.textContent = `正在处理 (${i+1}/${files.length}): ${file.name}`;
+                try {
+                    file.type === 'application/pdf' ? await processPdfFile(file) : await processImageFile(file);
+                } catch (err) {
+                    await addFallbackItem(file, "解析错误");
+                }
+            }
+            loading.classList.add('hidden');
+            e.target.value = "";
+            updateFilterOptions();
+            currentPage = 1;
+            render();
+        };
+
+        async function saveItemWithCheck(newItem) {
+            if (newItem.invoice_no && newItem.invoice_no !== "未识别" && newItem.invoice_no !== "QR格式错" && !newItem.invoice_no.startsWith("失败:")) {
+                const isDuplicate = expenses.some(e => e.invoice_no === newItem.invoice_no);
+                if (isDuplicate) {
+                    showToast(`跳过重复发票: ${newItem.invoice_no}`, true);
+                    return false;
+                }
+            }
+            expenses.unshift(newItem);
+            await dbPut(newItem);
+            return true;
+        }
+
+        async function processPdfFile(file) {
+            const buffer = await file.arrayBuffer();
+            const pdf = await pdfjsLib.getDocument({ data: buffer }).promise;
+            const page = await pdf.getPage(1);
+            const viewport = page.getViewport({ scale: 2.0 });
+            const canvas = document.createElement('canvas');
+            const context = canvas.getContext('2d');
+            canvas.width = viewport.width; canvas.height = viewport.height;
+            await page.render({ canvasContext: context, viewport: viewport }).promise;
+            const qrText = scanQRCode(canvas, context);
+            const fileBase64 = await fileToBase64(file);
+            if (qrText) return parseQrDataAndSave(qrText, fileBase64, 'application/pdf', file.name);
+            const imgBase64 = canvas.toDataURL('image/jpeg', 0.8).split(',')[1];
+            return await performDoubaoAI(imgBase64, 'image/jpeg', fileBase64, 'application/pdf', file.name);
+        }
+
+        async function processImageFile(file) {
+            const base64 = await fileToBase64(file);
+            return await performDoubaoAI(base64, file.type, base64, file.type, file.name);
+        }
+
+        function scanQRCode(canvas, context) {
+            const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+            const code = jsQR(imageData.data, imageData.width, imageData.height);
+            return code ? code.data : null;
+        }
+
+        async function performDoubaoAI(ocrBase64, ocrMime, originalBase64, originalMime, fileName) {
+            const url = "https://ark.cn-beijing.volces.com/api/v3/chat/completions";
+            try {
+                const response = await fetch(url, {
+                    method: 'POST',
+                    headers: { 'Authorization': `Bearer ${ARK_API_KEY}`, 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        model: ARK_ENDPOINT,
+                        messages: [{ role: "user", content: [
+                            { type: "text", text: `识别发票，输出JSON：{"invoice_no":"","amount":0,"date":"YYYY-MM-DD"}` },
+                            { type: "image_url", image_url: { url: `data:${ocrMime};base64,${ocrBase64}` } }
+                        ]}],
+                        response_format: { type: "json_object" }
+                    })
+                });
+                const res = await response.json();
+                const data = JSON.parse(res.choices[0].message.content);
+                const newItem = {
+                    id: Date.now() + Math.random(),
+                    invoice_no: data.invoice_no || "未识别",
+                    amount: parseFloat(data.amount) || 0,
+                    date: data.date || new Date().toISOString().split('T')[0],
+                    status: 'pending', note: '', fileData: originalBase64, fileType: originalMime, fileName: fileName
+                };
+                await saveItemWithCheck(newItem);
+            } catch (e) {
+                await addFallbackItem({name: fileName}, "AI故障", originalBase64, originalMime);
+            }
+        }
+
+        async function parseQrDataAndSave(rawData, fileBase64, mimeType, fileName) {
+            const p = rawData.split(',');
+            const newItem = {
+                id: Date.now() + Math.random(),
+                invoice_no: p[3] || "QR格式错", amount: parseFloat(p[4]) || 0,
+                date: (p[5] && p[5].length === 8) ? `${p[5].substring(0,4)}-${p[5].substring(4,6)}-${p[5].substring(6,8)}` : p[5],
+                status: 'pending', note: '', fileData: fileBase64, fileType: mimeType, fileName: fileName
+            };
+            await saveItemWithCheck(newItem);
+        }
+
+        async function addFallbackItem(file, errorMsg, base64 = "", mime = "") {
+            const newItem = {
+                id: Date.now() + Math.random(), invoice_no: `失败: ${errorMsg}`, amount: 0,
+                date: new Date().toISOString().split('T')[0], status: 'pending', note: file.name || '',
+                fileData: base64, fileType: mime || "image/jpeg", fileName: file.name
+            };
+            expenses.unshift(newItem);
+            await dbPut(newItem);
+        }
+
+        const fileToBase64 = file => new Promise(r => { const fr = new FileReader(); fr.onload = e => r(e.target.result.split(',')[1]); fr.readAsDataURL(file); });
+
+        function render() {
+            const list = document.getElementById('expense-list');
+            const selMonth = document.getElementById('month-filter').value;
+            
+            let filtered = expenses.sort((a,b) => new Date(b.date) - new Date(a.date));
+            if (selMonth !== 'all') filtered = filtered.filter(i => i.date.startsWith(selMonth));
+
+            document.getElementById('total-items-count').textContent = filtered.length;
+
+            const totalPages = Math.ceil(filtered.length / itemsPerPage) || 1;
+            if (currentPage > totalPages) currentPage = totalPages;
+            const start = (currentPage - 1) * itemsPerPage;
+            const paginated = filtered.slice(start, start + itemsPerPage);
+
+            document.getElementById('page-current').textContent = currentPage;
+            document.getElementById('page-total').textContent = totalPages;
+            document.querySelectorAll('[onclick="changePage(\'prev\')"]').forEach(b => b.disabled = currentPage === 1);
+            document.querySelectorAll('[onclick="changePage(\'next\')"]').forEach(b => b.disabled = currentPage === totalPages);
+
+            // 更新全选框状态
+            const selectAllBox = document.getElementById('select-all');
+            if (paginated.length > 0) {
+                selectAllBox.checked = paginated.every(i => selectedIds.has(i.id));
+            } else {
+                selectAllBox.checked = false;
+            }
+
+            list.innerHTML = '';
+            document.getElementById('empty-state').classList.toggle('hidden', paginated.length > 0);
+
+            paginated.forEach(item => {
+                const isDone = item.status === 'completed';
+                const isSelected = selectedIds.has(item.id);
+                const tr = document.createElement('tr');
+                tr.className = `hover:bg-slate-50 transition-colors border-b border-slate-50 fade-in ${isSelected ? 'row-selected' : ''}`;
+                tr.innerHTML = `
+                    <td class="px-4 py-4 text-center">
+                        <input type="checkbox" ${isSelected ? 'checked' : ''} onchange="toggleSelectRow(${item.id}, this.checked)" class="w-4 h-4 rounded border-slate-300 text-indigo-600 cursor-pointer">
+                    </td>
+                    <td class="px-2 py-4 text-center">
+                        <div onclick="openPreview(${item.id})" class="w-8 h-8 ${item.fileType.includes('pdf')?'text-red-500 bg-red-50':'text-indigo-500 bg-indigo-50'} rounded flex items-center justify-center cursor-pointer shadow-sm mx-auto hover:scale-110 transition-transform">
+                            <i class="fas ${item.fileType.includes('pdf')?'fa-file-pdf':'fa-image'}"></i>
+                        </div>
+                    </td>
+                    <td class="px-4 py-4 font-mono font-bold text-slate-600 text-xs">${item.invoice_no}</td>
+                    <td class="px-4 py-4 text-right font-bold text-slate-900 font-mono text-sm">¥${item.amount.toFixed(2)}</td>
+                    <td class="px-4 py-4 text-center text-[11px] font-mono">${item.date}</td>
+                    <td class="px-4 py-4 text-center">
+                        <button onclick="toggleStatus(${item.id})" class="px-3 py-1 rounded-full text-[10px] font-bold ${isDone ? 'bg-emerald-100 text-emerald-600' : 'bg-amber-100 text-amber-600'}">
+                            ${isDone ? '已完成' : '待处理'}
+                        </button>
+                    </td>
+                    <td class="px-4 py-4">
+                        <div contenteditable="true" 
+                             onblur="updateNote(${item.id}, this.innerText)" 
+                             class="editable-field text-xs text-slate-500 italic min-h-[1.5em] px-1 transition-all outline-none">
+                            ${item.note || ''}
+                        </div>
+                    </td>
+                    <td class="px-4 py-4 text-center">
+                        <button onclick="deleteItem(${item.id})" class="text-slate-200 hover:text-red-500 transition-colors"><i class="fas fa-trash-alt"></i></button>
+                    </td>
+                `;
+                list.appendChild(tr);
+            });
+
+            updateStats(filtered);
+            updateBatchBar();
+            renderPageNumbers(totalPages);
+        }
+
+        window.updateNote = async (id, newText) => {
+            const item = expenses.find(i => i.id === id);
+            if (item && item.note !== newText.trim()) {
+                item.note = newText.trim();
+                await dbPut(item);
+                showToast('备注已保存');
+            }
+        };
+
+        function renderPageNumbers(total) {
+            const container = document.getElementById('page-numbers');
+            container.innerHTML = '';
+            let start = Math.max(1, currentPage - 1);
+            let end = Math.min(total, start + 2);
+            if (end - start < 2) start = Math.max(1, end - 2);
+            for (let i = start; i <= end; i++) {
+                const btn = document.createElement('button');
+                btn.className = `w-8 h-8 rounded-lg text-xs font-bold transition-all ${i === currentPage ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-500 hover:bg-white border border-transparent hover:border-slate-200'}`;
+                btn.textContent = i;
+                btn.onclick = () => { currentPage = i; render(); };
+                container.appendChild(btn);
+            }
+        }
+
+        window.changePage = (dir) => {
+            const selMonth = document.getElementById('month-filter').value;
+            let filtered = expenses;
+            if (selMonth !== 'all') filtered = filtered.filter(i => i.date.startsWith(selMonth));
+            const totalPages = Math.ceil(filtered.length / itemsPerPage) || 1;
+
+            if (dir === 'prev' && currentPage > 1) currentPage--;
+            else if (dir === 'next' && currentPage < totalPages) currentPage++;
+            render();
+        };
+
+        window.changeItemsPerPage = (val) => {
+            itemsPerPage = parseInt(val);
+            localStorage.setItem('ybx_items_per_page', itemsPerPage);
+            currentPage = 1;
+            render();
+        };
+
+        function updateStats(data) {
+            const total = data.reduce((s, i) => s + i.amount, 0);
+            const done = data.filter(i => i.status === 'completed').reduce((s, i) => s + i.amount, 0);
+            const pending = data.filter(i => i.status === 'pending').reduce((s, i) => s + i.amount, 0);
+            document.getElementById('stat-total').textContent = `¥ ${total.toLocaleString()}`;
+            document.getElementById('stat-reimbursed').textContent = `¥ ${done.toLocaleString()}`;
+            document.getElementById('stat-pending').textContent = `¥ ${pending.toLocaleString()}`;
+        }
+
+        window.toggleSelectRow = (id, c) => { 
+            c ? selectedIds.add(id) : selectedIds.delete(id); 
+            updateBatchBar(); 
+            render(); // 刷新以同步全选框和行背景
+        };
+
+        window.toggleSelectAll = (el) => { 
+            const selMonth = document.getElementById('month-filter').value;
+            let filtered = expenses.sort((a,b) => new Date(b.date) - new Date(a.date));
+            if (selMonth !== 'all') filtered = filtered.filter(i => i.date.startsWith(selMonth));
+            
+            const start = (currentPage - 1) * itemsPerPage;
+            const curPageItems = filtered.slice(start, start + itemsPerPage);
+            
+            curPageItems.forEach(i => {
+                if (el.checked) selectedIds.add(i.id);
+                else selectedIds.delete(i.id);
+            }); 
+            render(); 
+        };
+
+        function updateBatchBar() { 
+            document.getElementById('selected-count').textContent = selectedIds.size; 
+            document.getElementById('batch-bar').classList.toggle('hidden-bar', selectedIds.size === 0); 
+        }
+
+        window.toggleStatus = async (id) => { 
+            const i = expenses.find(x => x.id === id); 
+            i.status = i.status === 'completed' ? 'pending' : 'completed'; 
+            await dbPut(i); render(); 
+        };
+
+        window.deleteItem = async (id) => { 
+            if(confirm('删除此条目？')) { 
+                await dbDelete(id); 
+                expenses = expenses.filter(x => x.id !== id); 
+                selectedIds.delete(id);
+                render(); 
+            } 
+        };
+
+        window.batchDelete = async () => {
+            if(confirm(`确认删除选中的 ${selectedIds.size} 项?`)) {
+                for(let id of selectedIds) await dbDelete(id);
+                expenses = expenses.filter(i => !selectedIds.has(i.id));
+                selectedIds.clear();
+                render();
+            }
+        };
+
+        window.batchUpdateStatus = async (s) => {
+            for(let id of selectedIds) {
+                const item = expenses.find(i => i.id === id);
+                if(item) { item.status = s; await dbPut(item); }
+            }
+            selectedIds.clear(); render();
+        };
+
+        window.openPreview = (id) => {
+            const item = expenses.find(i => i.id === id);
+            const container = document.getElementById('preview-container');
+            document.getElementById('preview-filename').textContent = item.fileName || "预览";
+            container.innerHTML = item.fileType.includes('pdf') 
+                ? `<iframe src="data:application/pdf;base64,${item.fileData}" class="w-full h-full border-none"></iframe>`
+                : `<div class="p-4 flex justify-center"><img src="data:${item.fileType};base64,${item.fileData}" class="max-w-full rounded-lg shadow-xl"></div>`;
+            document.getElementById('preview-modal').classList.replace('hidden', 'flex');
+        };
+
+        window.closePreview = (e, f) => { if(f || e.target.id === 'preview-modal') document.getElementById('preview-modal').classList.replace('flex', 'hidden'); };
+
+        function updateFilterOptions() {
+            const filterEl = document.getElementById('month-filter');
+            const months = [...new Set(expenses.map(i => i.date.substring(0, 7)))].sort().reverse();
+            let html = '<option value="all">所有月份</option>';
+            months.forEach(m => html += `<option value="${m}">${m}月</option>`);
+            filterEl.innerHTML = html;
+        }
+
+        function showToast(msg, isWarning = false) {
+            const t = document.getElementById('toast');
+            t.textContent = msg;
+            t.style.backgroundColor = isWarning ? '#ef4444' : '#0f172a';
+            t.style.opacity = '1';
+            setTimeout(() => t.style.opacity = '0', 3000);
+        }
+
+        window.exportJSON = () => {
+            const blob = new Blob([JSON.stringify(expenses, null, 2)], {type:'application/json'});
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = `报销备份_${new Date().toISOString().split('T')[0]}.json`;
+            a.click();
+        };
+    </script>
+</body>
+</html>
