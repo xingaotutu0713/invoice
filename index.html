@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>易报销 - 智能存储分页版</title>
+    <title>易报销 - 智能存储多选版</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
@@ -31,6 +31,10 @@
             opacity: 0; transition: opacity 0.3s; border-radius: 9999px;
         }
         .avatar-container:hover .avatar-overlay { opacity: 1; }
+
+        /* 多选下拉框样式 */
+        .dropdown-menu { display: none; }
+        .dropdown-menu.active { display: block; }
     </style>
 </head>
 <body class="bg-slate-50 text-slate-800 min-h-screen font-sans pb-24">
@@ -63,7 +67,7 @@
                 <div class="flex flex-col md:flex-row items-center justify-between gap-8">
                     <div class="flex-1">
                         <h2 class="text-xl font-bold text-slate-800 mb-2">智能录入</h2>
-                        <p class="text-sm text-slate-500 mb-6">上传图片或PDF发票，AI 将自动提取信息（支持查重）。</p>
+                        <p class="text-sm text-slate-500 mb-6">上传图片或PDF发票，AI 将自动提取信息。</p>
                         <div id="ai-loading" class="hidden mt-2 p-4 bg-indigo-50 rounded-2xl flex items-center space-x-4 border border-indigo-100">
                             <div class="animate-spin rounded-full h-5 w-5 border-2 border-indigo-500 border-t-transparent"></div>
                             <div class="text-sm font-bold text-indigo-600" id="loading-status">正在解析文件...</div>
@@ -83,15 +87,15 @@
         <!-- 统计 -->
         <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
             <div class="bg-slate-900 p-6 rounded-2xl text-white shadow-xl">
-                <p class="text-slate-400 text-[10px] font-bold uppercase tracking-widest">总金额</p>
+                <p class="text-slate-400 text-[20px] font-bold uppercase tracking-widest">总金额</p>
                 <p class="text-3xl font-bold mt-2 font-mono" id="stat-total">¥ 0.00</p>
             </div>
             <div class="bg-emerald-50 border border-emerald-100 p-6 rounded-2xl">
-                <p class="text-emerald-600 text-[10px] font-bold uppercase tracking-widest">已完成</p>
+                <p class="text-emerald-600 text-[20px] font-bold uppercase tracking-widest">已完成</p>
                 <p class="text-3xl font-bold mt-2 text-emerald-700 font-mono" id="stat-reimbursed">¥ 0.00</p>
             </div>
             <div class="bg-amber-50 border border-amber-100 p-6 rounded-2xl">
-                <p class="text-amber-600 text-[10px] font-bold uppercase tracking-widest">待报销</p>
+                <p class="text-amber-600 text-[20px] font-bold uppercase tracking-widest">待处理</p>
                 <p class="text-3xl font-bold mt-2 text-amber-700 font-mono" id="stat-pending">¥ 0.00</p>
             </div>
         </div>
@@ -99,11 +103,27 @@
         <!-- 列表 -->
         <section class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
             <div class="px-6 py-4 border-b border-slate-100 flex flex-col md:flex-row md:justify-between md:items-center bg-white space-y-3 md:space-y-0">
-                <div class="flex items-center space-x-4">
+                <div class="flex items-center space-x-4 relative">
                     <h3 class="font-bold text-slate-700">明细列表</h3>
-                    <select id="month-filter" onchange="currentPage=1;render()" class="text-xs border border-slate-200 rounded-lg px-3 py-1.5 font-bold text-slate-600 bg-slate-50">
-                        <option value="all">所有月份</option>
-                    </select>
+                    
+                    <!-- 多选月份筛选器 -->
+                    <div class="relative inline-block text-left" id="month-filter-container">
+                        <button onclick="toggleMonthDropdown()" class="flex items-center space-x-2 text-xs border border-slate-200 rounded-lg px-3 py-1.5 font-bold text-slate-600 bg-slate-50 hover:bg-slate-100 transition-colors">
+                            <span>月份筛选</span>
+                            <span id="selected-months-badge" class="bg-indigo-500 text-white text-[10px] px-1.5 rounded-full hidden">0</span>
+                            <i class="fas fa-chevron-down text-[10px] opacity-50"></i>
+                        </button>
+                        
+                        <div id="month-dropdown" class="dropdown-menu absolute left-0 mt-2 w-56 origin-top-left rounded-xl bg-white shadow-2xl ring-1 ring-black ring-opacity-5 focus:outline-none z-30 p-2">
+                            <div class="flex items-center justify-between p-2 mb-1 border-b border-slate-50">
+                                <span class="text-[10px] font-bold text-slate-400 uppercase">选择月份</span>
+                                <button onclick="clearMonthSelection()" class="text-[10px] text-indigo-500 font-bold hover:underline">全选/重置</button>
+                            </div>
+                            <div id="month-options-list" class="max-h-60 overflow-y-auto space-y-1">
+                                <!-- 选项动态生成 -->
+                            </div>
+                        </div>
+                    </div>
                 </div>
                 <div class="flex items-center text-xs font-bold text-slate-400 bg-slate-50 px-3 py-1.5 rounded-full">
                     <span class="mr-1">共</span>
@@ -121,10 +141,11 @@
                             </th>
                             <th class="px-2 py-4 w-12 text-center">预览</th>
                             <th class="px-4 py-4">发票编号</th>
-                            <th class="px-4 py-4 text-right">金额</th>
+                            <th class="px-4 py-4 text-center">金额</th>
                             <th class="px-4 py-4 text-center">日期</th>
+                            <th class="px-4 py-4 text-center">报销类型</th>
                             <th class="px-4 py-4 text-center">状态</th>
-                            <th class="px-4 py-4">备注 (可点击编辑)</th>
+                            <th class="px-4 py-4">备注 (可编辑)</th>
                             <th class="px-4 py-4 text-center">操作</th>
                         </tr>
                     </thead>
@@ -174,6 +195,9 @@
         <div class="flex items-center space-x-2">
             <button onclick="batchUpdateStatus('completed')" class="hover:bg-emerald-500/20 text-emerald-400 px-3 py-1.5 rounded-xl text-xs font-bold flex items-center">
                 <i class="fas fa-check-double mr-2"></i> 完成报销
+            </button>
+            <button onclick="batchUpdateStatus('pending')" class="hover:bg-amber-500/20 text-amber-400 px-3 py-1.5 rounded-xl text-xs font-bold flex items-center">
+                <i class="fas fa-undo mr-2"></i> 设为待处理
             </button>
             <button onclick="batchDelete()" class="hover:bg-red-500/20 text-red-400 px-3 py-1.5 rounded-xl text-xs font-bold flex items-center">
                 <i class="fas fa-trash-alt mr-2"></i> 批量删除
@@ -252,6 +276,7 @@
 
         let expenses = [];
         let selectedIds = new Set();
+        let selectedMonths = new Set(); 
         let currentPage = 1;
         let itemsPerPage = parseInt(localStorage.getItem('ybx_items_per_page')) || 10;
 
@@ -261,9 +286,55 @@
             if (savedAvatar) document.getElementById('display-avatar').src = savedAvatar;
             expenses = await dbGetAll();
             document.getElementById('items-per-page').value = itemsPerPage;
+            
+            window.addEventListener('click', (e) => {
+                const container = document.getElementById('month-filter-container');
+                if (!container.contains(e.target)) {
+                    document.getElementById('month-dropdown').classList.remove('active');
+                }
+            });
+
             updateFilterOptions();
             render();
         };
+
+        function toggleMonthDropdown() {
+            document.getElementById('month-dropdown').classList.toggle('active');
+        }
+
+        function toggleMonthSelection(month) {
+            if (selectedMonths.has(month)) {
+                selectedMonths.delete(month);
+            } else {
+                selectedMonths.add(month);
+            }
+            updateMonthBadge();
+            currentPage = 1;
+            render();
+        }
+
+        function clearMonthSelection() {
+            const allMonths = [...new Set(expenses.map(i => i.date.substring(0, 7)))];
+            if (selectedMonths.size === allMonths.length) {
+                selectedMonths.clear();
+            } else {
+                allMonths.forEach(m => selectedMonths.add(m));
+            }
+            updateMonthBadge();
+            updateFilterOptions();
+            currentPage = 1;
+            render();
+        }
+
+        function updateMonthBadge() {
+            const badge = document.getElementById('selected-months-badge');
+            if (selectedMonths.size > 0) {
+                badge.textContent = selectedMonths.size;
+                badge.classList.remove('hidden');
+            } else {
+                badge.classList.add('hidden');
+            }
+        }
 
         async function handleAvatarUpload(input) {
             const file = input.files[0];
@@ -363,7 +434,12 @@
                     invoice_no: data.invoice_no || "未识别",
                     amount: parseFloat(data.amount) || 0,
                     date: data.date || new Date().toISOString().split('T')[0],
-                    status: 'pending', note: '', fileData: originalBase64, fileType: originalMime, fileName: fileName
+                    status: 'pending', 
+                    type: '', 
+                    note: '', 
+                    fileData: originalBase64, 
+                    fileType: originalMime, 
+                    fileName: fileName
                 };
                 await saveItemWithCheck(newItem);
             } catch (e) {
@@ -377,7 +453,7 @@
                 id: Date.now() + Math.random(),
                 invoice_no: p[3] || "QR格式错", amount: parseFloat(p[4]) || 0,
                 date: (p[5] && p[5].length === 8) ? `${p[5].substring(0,4)}-${p[5].substring(4,6)}-${p[5].substring(6,8)}` : p[5],
-                status: 'pending', note: '', fileData: fileBase64, fileType: mimeType, fileName: fileName
+                status: 'pending', type: '', note: '', fileData: fileBase64, fileType: mimeType, fileName: fileName
             };
             await saveItemWithCheck(newItem);
         }
@@ -385,7 +461,7 @@
         async function addFallbackItem(file, errorMsg, base64 = "", mime = "") {
             const newItem = {
                 id: Date.now() + Math.random(), invoice_no: `失败: ${errorMsg}`, amount: 0,
-                date: new Date().toISOString().split('T')[0], status: 'pending', note: file.name || '',
+                date: new Date().toISOString().split('T')[0], status: 'pending', type: '', note: file.name || '',
                 fileData: base64, fileType: mime || "image/jpeg", fileName: file.name
             };
             expenses.unshift(newItem);
@@ -396,10 +472,12 @@
 
         function render() {
             const list = document.getElementById('expense-list');
-            const selMonth = document.getElementById('month-filter').value;
             
             let filtered = expenses.sort((a,b) => new Date(b.date) - new Date(a.date));
-            if (selMonth !== 'all') filtered = filtered.filter(i => i.date.startsWith(selMonth));
+            
+            if (selectedMonths.size > 0) {
+                filtered = filtered.filter(i => selectedMonths.has(i.date.substring(0, 7)));
+            }
 
             document.getElementById('total-items-count').textContent = filtered.length;
 
@@ -413,7 +491,6 @@
             document.querySelectorAll('[onclick="changePage(\'prev\')"]').forEach(b => b.disabled = currentPage === 1);
             document.querySelectorAll('[onclick="changePage(\'next\')"]').forEach(b => b.disabled = currentPage === totalPages);
 
-            // 更新全选框状态
             const selectAllBox = document.getElementById('select-all');
             if (paginated.length > 0) {
                 selectAllBox.checked = paginated.every(i => selectedIds.has(i.id));
@@ -439,8 +516,14 @@
                         </div>
                     </td>
                     <td class="px-4 py-4 font-mono font-bold text-slate-600 text-xs">${item.invoice_no}</td>
-                    <td class="px-4 py-4 text-right font-bold text-slate-900 font-mono text-sm">¥${item.amount.toFixed(2)}</td>
+                    <!-- 金额居中对齐 -->
+                    <td class="px-4 py-4 text-center font-bold text-slate-900 font-mono text-sm">¥${item.amount.toFixed(2)}</td>
                     <td class="px-4 py-4 text-center text-[11px] font-mono">${item.date}</td>
+                    <td class="px-4 py-4 text-center">
+                        <button onclick="toggleType(${item.id})" class="min-w-[80px] px-3 py-1 rounded-lg text-[10px] font-bold border transition-all ${item.type ? 'bg-indigo-50 border-indigo-200 text-indigo-600' : 'bg-slate-50 border-slate-100 text-slate-400'}">
+                            ${item.type || '未选择'}
+                        </button>
+                    </td>
                     <td class="px-4 py-4 text-center">
                         <button onclick="toggleStatus(${item.id})" class="px-3 py-1 rounded-full text-[10px] font-bold ${isDone ? 'bg-emerald-100 text-emerald-600' : 'bg-amber-100 text-amber-600'}">
                             ${isDone ? '已完成' : '待处理'}
@@ -474,6 +557,17 @@
             }
         };
 
+        window.toggleType = async (id) => {
+            const item = expenses.find(i => i.id === id);
+            if (!item) return;
+            if (!item.type) item.type = '对内报销';
+            else if (item.type === '对内报销') item.type = '对公转账';
+            else item.type = '';
+            await dbPut(item);
+            render();
+            showToast(`类型更新: ${item.type || '无'}`);
+        };
+
         function renderPageNumbers(total) {
             const container = document.getElementById('page-numbers');
             container.innerHTML = '';
@@ -490,11 +584,11 @@
         }
 
         window.changePage = (dir) => {
-            const selMonth = document.getElementById('month-filter').value;
             let filtered = expenses;
-            if (selMonth !== 'all') filtered = filtered.filter(i => i.date.startsWith(selMonth));
+            if (selectedMonths.size > 0) {
+                filtered = filtered.filter(i => selectedMonths.has(i.date.substring(0, 7)));
+            }
             const totalPages = Math.ceil(filtered.length / itemsPerPage) || 1;
-
             if (dir === 'prev' && currentPage > 1) currentPage--;
             else if (dir === 'next' && currentPage < totalPages) currentPage++;
             render();
@@ -519,17 +613,16 @@
         window.toggleSelectRow = (id, c) => { 
             c ? selectedIds.add(id) : selectedIds.delete(id); 
             updateBatchBar(); 
-            render(); // 刷新以同步全选框和行背景
+            render(); 
         };
 
         window.toggleSelectAll = (el) => { 
-            const selMonth = document.getElementById('month-filter').value;
             let filtered = expenses.sort((a,b) => new Date(b.date) - new Date(a.date));
-            if (selMonth !== 'all') filtered = filtered.filter(i => i.date.startsWith(selMonth));
-            
+            if (selectedMonths.size > 0) {
+                filtered = filtered.filter(i => selectedMonths.has(i.date.substring(0, 7)));
+            }
             const start = (currentPage - 1) * itemsPerPage;
             const curPageItems = filtered.slice(start, start + itemsPerPage);
-            
             curPageItems.forEach(i => {
                 if (el.checked) selectedIds.add(i.id);
                 else selectedIds.delete(i.id);
@@ -571,7 +664,10 @@
                 const item = expenses.find(i => i.id === id);
                 if(item) { item.status = s; await dbPut(item); }
             }
-            selectedIds.clear(); render();
+            const statusText = s === 'completed' ? '已标记为完成' : '已重置为待处理';
+            showToast(`${selectedIds.size}项${statusText}`);
+            selectedIds.clear(); 
+            render();
         };
 
         window.openPreview = (id) => {
@@ -587,11 +683,29 @@
         window.closePreview = (e, f) => { if(f || e.target.id === 'preview-modal') document.getElementById('preview-modal').classList.replace('flex', 'hidden'); };
 
         function updateFilterOptions() {
-            const filterEl = document.getElementById('month-filter');
+            const filterList = document.getElementById('month-options-list');
             const months = [...new Set(expenses.map(i => i.date.substring(0, 7)))].sort().reverse();
-            let html = '<option value="all">所有月份</option>';
-            months.forEach(m => html += `<option value="${m}">${m}月</option>`);
-            filterEl.innerHTML = html;
+            
+            filterList.innerHTML = '';
+            months.forEach(m => {
+                const isChecked = selectedMonths.has(m);
+                const item = document.createElement('div');
+                item.className = `flex items-center px-3 py-2 hover:bg-slate-50 cursor-pointer rounded-lg transition-colors ${isChecked ? 'bg-indigo-50/50' : ''}`;
+                item.onclick = (e) => {
+                    e.stopPropagation();
+                    toggleMonthSelection(m);
+                    updateFilterOptions();
+                };
+                item.innerHTML = `
+                    <input type="checkbox" ${isChecked ? 'checked' : ''} class="w-3.5 h-3.5 rounded border-slate-300 text-indigo-600 pointer-events-none">
+                    <span class="ml-3 text-xs font-bold ${isChecked ? 'text-indigo-600' : 'text-slate-600'}">${m}月</span>
+                `;
+                filterList.appendChild(item);
+            });
+
+            if (months.length === 0) {
+                filterList.innerHTML = '<div class="text-[10px] text-slate-400 p-4 text-center">暂无月份数据</div>';
+            }
         }
 
         function showToast(msg, isWarning = false) {
